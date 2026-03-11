@@ -1,18 +1,18 @@
 import {App, PluginSettingTab, Setting} from "obsidian";
-import MyPlugin from "./main";
+import FanoutPlugin from "./main";
 
-export interface MyPluginSettings {
-	mySetting: string;
+export interface FanoutPluginSettings {
+	fanoutSetting: string;
 }
 
-export const DEFAULT_SETTINGS: MyPluginSettings = {
-	mySetting: 'default'
+export const DEFAULT_SETTINGS: FanoutPluginSettings = {
+	fanoutSetting: 'default'
 }
 
-export class SampleSettingTab extends PluginSettingTab {
-	plugin: MyPlugin;
+export class FanoutSettingTab extends PluginSettingTab {
+	plugin: FanoutPlugin;
 
-	constructor(app: App, plugin: MyPlugin) {
+	constructor(app: App, plugin: FanoutPlugin) {
 		super(app, plugin);
 		this.plugin = plugin;
 	}
@@ -27,9 +27,9 @@ export class SampleSettingTab extends PluginSettingTab {
 			.setDesc('It\'s a secret')
 			.addText(text => text
 				.setPlaceholder('Enter your secret')
-				.setValue(this.plugin.settings.mySetting)
+				.setValue(this.plugin.settings.fanoutSetting)
 				.onChange(async (value) => {
-					this.plugin.settings.mySetting = value;
+					this.plugin.settings.fanoutSetting = value;
 					await this.plugin.saveSettings();
 				}));
 	}
