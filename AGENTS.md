@@ -1,5 +1,8 @@
 # Obsidian community plugin
 
+## Skill with more context
+Reference obsidian-fanout\.github\skills\Obsidian-plugin\skill.md for more guidance on how to work with Obsidian.
+
 ## Project overview
 
 - Target: Obsidian Community Plugin (TypeScript → bundled JavaScript).
