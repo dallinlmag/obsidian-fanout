@@ -1,5 +1,8 @@
-import {App, Editor, MarkdownView, Modal, Notice, Plugin} from 'obsidian';
-import {DEFAULT_SETTINGS, FanoutPluginSettings, FanoutSettingTab} from "./settings";
+import {Notice, Plugin, TFile} from "obsidian";
+import type {FanoutPluginSettings} from "./types";
+import {setDebugLogging} from "./types";
+import {DEFAULT_SETTINGS, FanoutSettingTab} from "./settings";
+import {autoTriggerOnCreate, manualFanout} from "./trigger";
 
 export default class FanoutPlugin extends Plugin {
 	settings: FanoutPluginSettings;
@@ -7,82 +10,52 @@ export default class FanoutPlugin extends Plugin {
 	async onload() {
 		await this.loadSettings();
 
-		// This creates an icon in the left ribbon.
-		this.addRibbonIcon('dice', 'Sample', (evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
-		});
-
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status bar text');
-
-		// This adds a simple command that can be triggered anywhere
 		this.addCommand({
-			id: 'open-modal-simple',
-			name: 'Open modal (simple)',
+			id: "fanout-distribute",
+			name: "Distribute daily note",
 			callback: () => {
-				new FanoutModal(this.app).open();
-			}
-		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'replace-selected',
-			name: 'Replace selected content',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				editor.replaceSelection('Sample editor command');
-			}
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-modal-complex',
-			name: 'Open modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new FanoutModal(this.app).open();
-					}
-
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
-				return false;
-			}
+				manualFanout(this.app, this.settings, (date) => this.markProcessed(date));
+			},
 		});
 
-		// This adds a settings tab so the user can configure various aspects of the plugin
+		// Auto-trigger: listen for new file creation (new daily note)
+		this.registerEvent(
+			this.app.vault.on("create", (file) => {
+				if (!(file instanceof TFile)) return;
+				autoTriggerOnCreate(
+					this.app,
+					file,
+					this.settings,
+					(date) => this.markProcessed(date),
+				);
+			}),
+		);
+
 		this.addSettingTab(new FanoutSettingTab(this.app, this));
-
 	}
 
-	onunload() {
-	}
+	onunload() {}
 
 	async loadSettings() {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData() as Partial<FanoutPluginSettings>);
+		if (!Array.isArray(this.settings.rules)) {
+			this.settings.rules = [];
+		}
+		setDebugLogging(this.settings.debugLogging);
 	}
 
 	async saveSettings() {
 		await this.saveData(this.settings);
 	}
-}
 
-class FanoutModal extends Modal {
-	constructor(app: App) {
-		super(app);
-	}
-
-	onOpen() {
-		let {contentEl} = this;
-		contentEl.setText('Woah!');
-	}
-
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
+	async markProcessed(date: string) {
+		if (!this.settings.processedDates.includes(date)) {
+			this.settings.processedDates.push(date);
+			// Keep only the last 90 days to avoid unbounded growth
+			if (this.settings.processedDates.length > 90) {
+				this.settings.processedDates = this.settings.processedDates.slice(-90);
+			}
+			await this.saveSettings();
+		}
 	}
 }
