@@ -1,62 +1,48 @@
 import {App, TFile, Notice} from "obsidian";
-import {
-	getDailyNoteSettings,
-	getAllDailyNotes,
-	getDailyNote,
-} from "obsidian-daily-notes-interface";
 import type {FanoutPluginSettings} from "./types";
 import {fanoutLog} from "./types";
 import {parseSections, getTemplateSections} from "./parser";
 import {executeFanout} from "./fanout";
+import {
+	findTodaysDailyNote,
+	getLastDailyNote,
+	isDailyNote,
+	getDailyNoteDateStr,
+} from "./daily-note-utils";
 
-declare global {
-	interface Window {
-		moment: typeof import("moment");
+/**
+ * Check if a file has the FanoutComplete frontmatter property.
+ */
+function hasFanoutComplete(content: string): boolean {
+	const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+	if (!fmMatch) return false;
+	return /^FanoutComplete\s*:/m.test(fmMatch[1] ?? "");
+}
+
+/**
+ * Add or update the FanoutComplete frontmatter property with today's date.
+ */
+async function stampFanoutComplete(app: App, file: TFile): Promise<void> {
+	const content = await app.vault.read(file);
+	const now = new Date();
+	const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+	const fmMatch = content.match(/^(---\r?\n)([\s\S]*?)(\r?\n---)/);
+
+	if (fmMatch) {
+		const fmBody = fmMatch[2] ?? "";
+		let newFmBody: string;
+		if (/^FanoutComplete\s*:/m.test(fmBody)) {
+			newFmBody = fmBody.replace(/^FanoutComplete\s*:.*$/m, `FanoutComplete: ${today}`);
+		} else {
+			newFmBody = fmBody + `\nFanoutComplete: ${today}`;
+		}
+		const newContent = fmMatch[1] + newFmBody + fmMatch[3] + content.slice((fmMatch[0] ?? "").length);
+		await app.vault.modify(file, newContent);
+	} else {
+		const newContent = `---\nFanoutComplete: ${today}\n---\n` + content;
+		await app.vault.modify(file, newContent);
 	}
-}
-
-/**
- * Clean folder path: strip leading/trailing slashes.
- */
-function cleanFolder(folder: string): string {
-	if (folder.startsWith("/")) folder = folder.substring(1);
-	if (folder.endsWith("/")) folder = folder.substring(0, folder.length - 1);
-	return folder;
-}
-
-/**
- * Get the most recent daily note before today by scanning all daily notes.
- */
-function getLastDailyNote(app: App): TFile | undefined {
-	const {moment} = window;
-	const {folder, format} = getDailyNoteSettings();
-	const cleanedFolder = cleanFolder(folder ?? "");
-	const prefix = cleanedFolder.length === 0 ? "" : cleanedFolder + "/";
-	const dailyNoteRegex = new RegExp("^" + prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(.*)\\.md$");
-	const todayMoment = moment();
-
-	const dailyNoteFiles = app.vault
-		.getMarkdownFiles()
-		.filter((file) => file.path.startsWith(prefix) || prefix === "")
-		.filter((file) => {
-			const match = file.path.match(dailyNoteRegex);
-			return match && moment(match[1], format, true).isValid();
-		})
-		.filter((file) => {
-			const match = file.path.match(dailyNoteRegex);
-			return match && moment(match[1], format, true).isSameOrBefore(todayMoment, "day");
-		});
-
-	const sorted = dailyNoteFiles.sort((a, b) => {
-		const matchA = a.path.match(dailyNoteRegex);
-		const matchB = b.path.match(dailyNoteRegex);
-		const dateA = matchA ? moment(matchA[1], format, true) : moment(0);
-		const dateB = matchB ? moment(matchB[1], format, true) : moment(0);
-		return dateB.valueOf() - dateA.valueOf();
-	});
-
-	// sorted[0] is today (or the most recent), sorted[1] is the previous one
-	return sorted[1];
+	fanoutLog(`Stamped FanoutComplete: ${today} on "${file.path}"`);
 }
 
 /**
@@ -69,6 +55,13 @@ export async function runFanoutOnFile(
 	date: string,
 ): Promise<number> {
 	const content = await app.vault.read(file);
+
+	// Check for FanoutComplete property
+	if (settings.skipIfAlreadyProcessed && hasFanoutComplete(content)) {
+		fanoutLog(`Skipping "${file.path}" — already has FanoutComplete property`);
+		return 0;
+	}
+
 	const sections = parseSections(content, settings.headerLevel);
 
 	if (sections.size === 0) {
@@ -81,7 +74,13 @@ export async function runFanoutOnFile(
 	}
 
 	const templateSections = await getTemplateSections(app, settings.headerLevel);
-	return executeFanout(app, sections, enabledRules, date, file.basename, templateSections);
+	const count = await executeFanout(app, sections, enabledRules, date, file.basename, templateSections);
+
+	if (count > 0) {
+		await stampFanoutComplete(app, file);
+	}
+
+	return count;
 }
 
 /**
@@ -93,28 +92,16 @@ export async function autoTriggerOnCreate(
 	settings: FanoutPluginSettings,
 	markProcessed: (date: string) => Promise<void>,
 ): Promise<void> {
-	const {moment} = window;
-	const {folder, format} = getDailyNoteSettings();
-	const cleanedFolder = cleanFolder(folder ?? "");
-	const prefix = cleanedFolder.length === 0 ? "" : cleanedFolder + "/";
-
-	// Check if created file is in the daily notes folder
-	if (prefix && !createdFile.path.startsWith(prefix)) return;
-
-	// Check if the file matches the daily note format
-	const regex = new RegExp("^" + prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(.*)\\.md$");
-	const match = createdFile.path.match(regex);
-	if (!match || !moment(match[1], format, true).isValid()) return;
+	// Check if created file is a daily note
+	if (!isDailyNote(app, createdFile)) return;
 
 	// Find the previous daily note
 	const lastNote = getLastDailyNote(app);
 	if (!lastNote) return;
 
-	// Derive the date string from the previous daily note's filename
-	const lastMatch = lastNote.path.match(regex);
-	if (!lastMatch) return;
-	const lastDateMoment = moment(lastMatch[1], format, true);
-	const dateStr = lastDateMoment.format("YYYY-MM-DD");
+	// Derive the date string from the previous daily note
+	const dateStr = getDailyNoteDateStr(app, lastNote);
+	if (!dateStr) return;
 
 	// Skip if already processed
 	if (settings.processedDates.includes(dateStr)) return;
@@ -137,9 +124,7 @@ export async function manualFanout(
 	const {moment} = window;
 	const todayMoment = moment();
 
-	// Use getDailyNote from the interface to reliably find today's note
-	const allDailyNotes = getAllDailyNotes();
-	const todayFile = getDailyNote(todayMoment, allDailyNotes) as TFile | null;
+	const todayFile = findTodaysDailyNote(app);
 
 	if (!todayFile) {
 		new Notice("Fanout: could not find today's daily note.");

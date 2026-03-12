@@ -1,8 +1,8 @@
 import {App, Notice, PluginSettingTab, Setting, TFile} from "obsidian";
-import {getDailyNoteSettings} from "obsidian-daily-notes-interface";
 import type FanoutPlugin from "./main";
 import type {FanoutPluginSettings, FanoutRule} from "./types";
 import {setDebugLogging} from "./types";
+import {getEffectiveDailyNoteSettings, resolveTemplateFile} from "./daily-note-utils";
 import {FileSuggest} from "./ui/FileSuggest";
 import {FolderSuggest} from "./ui/FolderSuggest";
 import {manualFanout, batchFanoutFolder} from "./trigger";
@@ -12,6 +12,7 @@ export const DEFAULT_SETTINGS: FanoutPluginSettings = {
 	headerLevel: 2,
 	processedDates: [],
 	debugLogging: false,
+	skipIfAlreadyProcessed: true,
 };
 
 function generateId(): string {
@@ -31,14 +32,11 @@ export class FanoutSettingTab extends PluginSettingTab {
 	 * Read headings from the daily note template file (same approach as obsidian-rollover-daily-todos).
 	 */
 	private async getTemplateHeadings(): Promise<string[]> {
-		const {template} = getDailyNoteSettings();
+		const {template} = getEffectiveDailyNoteSettings(this.app);
 		if (!template) return [];
 
-		let file = this.app.vault.getAbstractFileByPath(template);
-		if (!file) {
-			file = this.app.vault.getAbstractFileByPath(template + ".md");
-		}
-		if (!file || !(file instanceof TFile)) return [];
+		const file = resolveTemplateFile(this.app, template);
+		if (!file) return [];
 
 		const templateContents = await this.app.vault.read(file);
 		const allHeadings = Array.from(templateContents.matchAll(/#{1,} .*/g)).map(
@@ -160,6 +158,16 @@ export class FanoutSettingTab extends PluginSettingTab {
 				toggle.setValue(this.plugin.settings.debugLogging).onChange(async (value) => {
 					this.plugin.settings.debugLogging = value;
 					setDebugLogging(value);
+					await this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName("Skip already processed files")
+			.setDesc("Skip files that have a FanoutComplete property in their frontmatter. Disable to re-process files that were already fanned out.")
+			.addToggle(toggle =>
+				toggle.setValue(this.plugin.settings.skipIfAlreadyProcessed).onChange(async (value) => {
+					this.plugin.settings.skipIfAlreadyProcessed = value;
 					await this.plugin.saveSettings();
 				})
 			);

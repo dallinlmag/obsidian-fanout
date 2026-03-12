@@ -1,5 +1,5 @@
 import {App, TFile} from "obsidian";
-import {getDailyNoteSettings} from "obsidian-daily-notes-interface";
+import {getEffectiveDailyNoteSettings, resolveTemplateFile} from "./daily-note-utils";
 import {fanoutLog} from "./types";
 
 /**
@@ -52,16 +52,13 @@ export function parseSections(content: string, _headerLevel: number): Map<string
  * Load and parse the daily note template to get its default section bodies.
  */
 export async function getTemplateSections(app: App, headerLevel: number): Promise<Map<string, string>> {
-	const {template} = getDailyNoteSettings();
+	const {template} = getEffectiveDailyNoteSettings(app);
 	if (!template) return new Map();
 
-	let file = app.vault.getAbstractFileByPath(template);
-	if (!file) {
-		file = app.vault.getAbstractFileByPath(template + ".md");
-	}
-	if (!file || !(file instanceof TFile)) return new Map();
+	const file = resolveTemplateFile(app, template);
+	if (!file) return new Map();
 
 	const content = await app.vault.read(file);
-	fanoutLog(`Loaded template: "${(file as TFile).path}"`);
+	fanoutLog(`Loaded template: "${file.path}"`);
 	return parseSections(content, headerLevel);
 }

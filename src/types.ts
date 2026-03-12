@@ -11,6 +11,7 @@ export interface FanoutPluginSettings {
 	headerLevel: number;
 	processedDates: string[];
 	debugLogging: boolean;
+	skipIfAlreadyProcessed: boolean;
 }
 
 /** Shared logger — only outputs when debug logging is enabled. */
