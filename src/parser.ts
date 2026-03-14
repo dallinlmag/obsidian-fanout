@@ -1,4 +1,4 @@
-import {App, TFile} from "obsidian";
+import {App} from "obsidian";
 import {getEffectiveDailyNoteSettings, resolveTemplateFile} from "./daily-note-utils";
 import {fanoutLog} from "./types";
 

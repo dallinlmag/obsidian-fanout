@@ -14,6 +14,49 @@ export interface DailyNoteConfig {
 	template: string;
 }
 
+// Typed interfaces for external plugin data accessed at runtime
+interface PeriodicNoteConfig {
+	enabled?: boolean;
+	format?: string;
+	folder?: string;
+	template?: string;
+	templatePath?: string;
+}
+
+interface PeriodicCalendarSet {
+	id: string;
+	day?: PeriodicNoteConfig;
+}
+
+interface PeriodicNotesStoreValue {
+	calendarSets?: PeriodicCalendarSet[];
+	activeCalendarSet?: string;
+}
+
+interface PeriodicNotesPlugin {
+	calendarSetManager?: {
+		getActiveConfig(granularity: string): PeriodicNoteConfig | undefined;
+	};
+	settings?: {
+		subscribe?: (callback: (val: PeriodicNotesStoreValue) => void) => (() => void);
+		daily?: PeriodicNoteConfig;
+	};
+}
+
+interface ObsidianAppWithPlugins extends App {
+	plugins?: {
+		getPlugin(id: string): PeriodicNotesPlugin | null | undefined;
+	};
+}
+
+function toConfig(format?: string, folder?: string, template?: string): DailyNoteConfig {
+	return {
+		format: format || "YYYY-MM-DD",
+		folder: (folder ?? "").trim(),
+		template: (template ?? "").trim(),
+	};
+}
+
 /**
  * Get daily note settings, checking multiple sources in order:
  * 1. Periodic Notes plugin — calendarSetManager API (most reliable)
@@ -23,56 +66,44 @@ export interface DailyNoteConfig {
  */
 export function getEffectiveDailyNoteSettings(app: App): DailyNoteConfig {
 	try {
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		const periodicNotes = (app as any).plugins?.getPlugin("periodic-notes");
+		const periodicNotes = (app as ObsidianAppWithPlugins).plugins?.getPlugin("periodic-notes");
 		if (periodicNotes) {
 			fanoutLog("Periodic Notes plugin found, reading settings...");
 
 			// Method 1: Use the calendarSetManager public API (most reliable for newer versions)
 			if (periodicNotes.calendarSetManager) {
 				try {
-					// eslint-disable-next-line @typescript-eslint/no-explicit-any
-					const dayConfig = periodicNotes.calendarSetManager.getActiveConfig("day") as any;
+					const dayConfig = periodicNotes.calendarSetManager.getActiveConfig("day");
 					if (dayConfig?.enabled) {
-						const config: DailyNoteConfig = {
-							format: dayConfig.format || "YYYY-MM-DD",
-							folder: (dayConfig.folder ?? "").trim(),
-							template: (dayConfig.templatePath ?? "").trim(),
-						};
+						const config = toConfig(dayConfig.format, dayConfig.folder, dayConfig.templatePath);
 						fanoutLog(`Using Periodic Notes (calendarSetManager): format="${config.format}", folder="${config.folder}", template="${config.template}"`);
 						return config;
 					}
 					fanoutLog("Periodic Notes calendarSetManager: daily notes not enabled in active set");
-				} catch (e) {
-					fanoutLog(`calendarSetManager.getActiveConfig failed: ${e}`);
+				} catch (e: unknown) {
+					fanoutLog(`calendarSetManager.getActiveConfig failed: ${String(e)}`);
 				}
 			}
 
 			// Method 2: Read from Svelte writable store directly
 			if (typeof periodicNotes.settings?.subscribe === "function") {
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
-				let storeValue: any = null;
+				let rawStoreValue: PeriodicNotesStoreValue | null = null;
 				const unsub = periodicNotes.settings.subscribe(
-					// eslint-disable-next-line @typescript-eslint/no-explicit-any
-					(val: any) => { storeValue = val; }
+					(val: PeriodicNotesStoreValue) => { rawStoreValue = val; }
 				);
 				if (typeof unsub === "function") unsub();
+				// TS can't track that subscribe() called the callback synchronously
+				const storeValue = rawStoreValue as PeriodicNotesStoreValue | null;
 
-				if (storeValue?.calendarSets?.length > 0) {
-					// eslint-disable-next-line @typescript-eslint/no-explicit-any
+				if (storeValue?.calendarSets && storeValue.calendarSets.length > 0) {
 					const activeSet = storeValue.calendarSets.find(
-						// eslint-disable-next-line @typescript-eslint/no-explicit-any
-						(s: any) => s.id === storeValue.activeCalendarSet
+						(s: PeriodicCalendarSet) => s.id === storeValue.activeCalendarSet
 					) ?? storeValue.calendarSets[0];
 
 					const dayConfig = activeSet?.day;
 					if (dayConfig?.enabled) {
-						const config: DailyNoteConfig = {
-							format: dayConfig.format || "YYYY-MM-DD",
-							folder: (dayConfig.folder ?? "").trim(),
-							template: (dayConfig.templatePath ?? "").trim(),
-						};
-						fanoutLog(`Using Periodic Notes (Svelte store, set "${activeSet.id}"): format="${config.format}", folder="${config.folder}", template="${config.template}"`);
+						const config = toConfig(dayConfig.format, dayConfig.folder, dayConfig.templatePath);
+						fanoutLog(`Using Periodic Notes (Svelte store, set "${activeSet?.id ?? "unknown"}"): format="${config.format}", folder="${config.folder}", template="${config.template}"`);
 						return config;
 					}
 				}
@@ -81,28 +112,20 @@ export function getEffectiveDailyNoteSettings(app: App): DailyNoteConfig {
 			// Method 3: Legacy periodic notes format (settings.daily is a plain object)
 			const legacyDaily = periodicNotes.settings?.daily;
 			if (legacyDaily?.enabled) {
-				const config: DailyNoteConfig = {
-					format: legacyDaily.format || "YYYY-MM-DD",
-					folder: (legacyDaily.folder ?? "").trim(),
-					template: (legacyDaily.template ?? "").trim(),
-				};
+				const config = toConfig(legacyDaily.format, legacyDaily.folder, legacyDaily.template);
 				fanoutLog(`Using Periodic Notes (legacy): format="${config.format}", folder="${config.folder}", template="${config.template}"`);
 				return config;
 			}
 
 			fanoutLog("Periodic Notes plugin found but no enabled daily config detected");
 		}
-	} catch (err) {
-		fanoutLog(`Error reading Periodic Notes settings: ${err}`);
+	} catch (err: unknown) {
+		fanoutLog(`Error reading Periodic Notes settings: ${String(err)}`);
 	}
 
 	// Fallback: core Daily Notes plugin via obsidian-daily-notes-interface
 	const dnSettings = getDailyNoteSettings();
-	const config: DailyNoteConfig = {
-		format: dnSettings.format || "YYYY-MM-DD",
-		folder: (dnSettings.folder ?? "").trim(),
-		template: (dnSettings.template ?? "").trim(),
-	};
+	const config = toConfig(dnSettings.format, dnSettings.folder, dnSettings.template);
 	fanoutLog(`Using core Daily Notes: format="${config.format}", folder="${config.folder}", template="${config.template}"`);
 	return config;
 }

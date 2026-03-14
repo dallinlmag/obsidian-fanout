@@ -45,15 +45,19 @@ export class FanoutSettingTab extends PluginSettingTab {
 		return allHeadings;
 	}
 
-	async display(): Promise<void> {
+	display(): void {
+		void this.populateAndRender();
+	}
+
+	private async populateAndRender(): Promise<void> {
 		this.templateHeadings = await this.getTemplateHeadings();
 
 		const {containerEl} = this;
 		containerEl.empty();
 
-		containerEl.createEl("h2", {text: "Fanout settings"});
+		new Setting(containerEl).setName("Configuration").setHeading();
 
-		containerEl.createEl("h3", {text: "Rules"});
+		new Setting(containerEl).setName("Rules").setHeading();
 		containerEl.createEl("p", {
 			text: "Each rule maps a header in your daily note to a target note.",
 			cls: "setting-item-description",
@@ -65,7 +69,7 @@ export class FanoutSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.addButton(btn =>
-				btn.setButtonText("Add rule").setCta().onClick(async () => {
+				btn.setButtonText("Add rule").setCta().onClick(() => {
 					const newRule: FanoutRule = {
 						id: generateId(),
 						sourceHeader: "",
@@ -74,20 +78,20 @@ export class FanoutSettingTab extends PluginSettingTab {
 						enabled: true,
 					};
 					this.plugin.settings.rules.push(newRule);
-					await this.plugin.saveSettings();
+					void this.plugin.saveSettings();
 					this.display();
 				})
 			);
 
 		// --- Actions ---
-		containerEl.createEl("h3", {text: "Actions"});
+		new Setting(containerEl).setName("Actions").setHeading();
 
 		new Setting(containerEl)
 			.setName("Run fanout now")
 			.setDesc("Distribute today's daily note using the rules above")
 			.addButton(btn =>
 				btn.setButtonText("Run fanout").setCta().onClick(() => {
-					manualFanout(this.app, this.plugin.settings, (date) => this.plugin.markProcessed(date));
+					void manualFanout(this.app, this.plugin.settings, (date) => this.plugin.markProcessed(date));
 				})
 			);
 
@@ -110,7 +114,7 @@ export class FanoutSettingTab extends PluginSettingTab {
 						new Notice("Fanout: please select a folder first.");
 						return;
 					}
-					batchFanoutFolder(this.app, batchFolder, this.plugin.settings);
+					void batchFanoutFolder(this.app, batchFolder, this.plugin.settings);
 				})
 			);
 
@@ -149,7 +153,7 @@ export class FanoutSettingTab extends PluginSettingTab {
 			);
 
 		// --- Debug ---
-		containerEl.createEl("h3", {text: "Advanced"});
+		new Setting(containerEl).setName("Advanced").setHeading();
 
 		new Setting(containerEl)
 			.setName("Debug logging")
@@ -164,6 +168,7 @@ export class FanoutSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Skip already processed files")
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
 			.setDesc("Skip files that have a FanoutComplete property in their frontmatter. Disable to re-process files that were already fanned out.")
 			.addToggle(toggle =>
 				toggle.setValue(this.plugin.settings.skipIfAlreadyProcessed).onChange(async (value) => {
@@ -175,10 +180,6 @@ export class FanoutSettingTab extends PluginSettingTab {
 
 	private renderRule(containerEl: HTMLElement, rule: FanoutRule): void {
 		const ruleContainer = containerEl.createDiv({cls: "fanout-rule-container"});
-		ruleContainer.style.border = "1px solid var(--background-modifier-border)";
-		ruleContainer.style.borderRadius = "8px";
-		ruleContainer.style.padding = "12px";
-		ruleContainer.style.marginBottom = "12px";
 
 		new Setting(ruleContainer)
 			.setName("Source header")
@@ -245,7 +246,7 @@ export class FanoutSettingTab extends PluginSettingTab {
 						this.plugin.settings.rules =
 							this.plugin.settings.rules.filter(r => r.id !== rule.id);
 						await this.plugin.saveSettings();
-						this.display();
+						void this.populateAndRender();
 					})
 			);
 	}

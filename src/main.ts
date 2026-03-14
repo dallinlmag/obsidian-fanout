@@ -1,4 +1,4 @@
-import {Notice, Plugin, TFile} from "obsidian";
+import {Plugin, TFile} from "obsidian";
 import type {FanoutPluginSettings} from "./types";
 import {setDebugLogging} from "./types";
 import {DEFAULT_SETTINGS, FanoutSettingTab} from "./settings";
@@ -11,10 +11,10 @@ export default class FanoutPlugin extends Plugin {
 		await this.loadSettings();
 
 		this.addCommand({
-			id: "fanout-distribute",
+			id: "distribute",
 			name: "Distribute daily note",
 			callback: () => {
-				manualFanout(this.app, this.settings, (date) => this.markProcessed(date));
+				void manualFanout(this.app, this.settings, (date) => this.markProcessed(date));
 			},
 		});
 
@@ -22,7 +22,7 @@ export default class FanoutPlugin extends Plugin {
 		this.registerEvent(
 			this.app.vault.on("create", (file) => {
 				if (!(file instanceof TFile)) return;
-				autoTriggerOnCreate(
+				void autoTriggerOnCreate(
 					this.app,
 					file,
 					this.settings,

@@ -23,6 +23,6 @@ export function setDebugLogging(enabled: boolean): void {
 
 export function fanoutLog(...args: unknown[]): void {
 	if (_debugEnabled) {
-		console.log("[Fanout]", ...args);
+		console.debug("[Fanout]", ...args);
 	}
 }
